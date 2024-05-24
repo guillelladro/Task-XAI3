@@ -1,0 +1,211 @@
+---
+title: "Task XAI 3"
+author: "Group 10"
+date: "2024-05-20"
+output: html_document
+---
+
+ÁNGEL LÓPEZ FERNÁNDEZ, GUILLERMO LLADRÓ QUILIS, VLAD GALAN GALAN
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1.- One dimensional Partial Dependence Plot.
+```{r}
+# Load needed packages
+#install.packages(c("randomForest", "ggplot2", "dplyr", "pdp"))
+library(randomForest)
+library(ggplot2)
+library(dplyr)
+library(pdp)
+
+# Load the data
+day <- read.csv('~/day.csv') %>%
+  mutate(season_1 = ifelse(season == 1, 1, 0),
+         season_2 = ifelse(season == 2, 1, 0),
+         season_3 = ifelse(season == 3, 1, 0),
+         MISTY = ifelse(weathersit == 2, 1, 0),
+         RAIN = ifelse(weathersit %in% c(3, 4), 1, 0),
+         temp = temp * 47 - 8,
+         hum = hum * 100,
+         windspeed = windspeed * 67,
+         dteday = as.Date(dteday),
+         days_since_2011 = as.integer(dteday - as.Date("2011-01-01")) + 1)
+
+# Train random forest
+set.seed(123) # Para reproducibilidad
+rf_model <- randomForest(cnt ~ workingday + holiday + season_1 + season_2 + season_3 + MISTY + RAIN + temp + hum + windspeed + days_since_2011, data = day, ntree = 500)
+
+# Create PDPs
+pdp_days <- partial(rf_model, pred.var = "days_since_2011", plot = FALSE)
+pdp_temp <- partial(rf_model, pred.var = "temp", plot = FALSE)
+pdp_hum <- partial(rf_model, pred.var = "hum", plot = FALSE)
+pdp_windspeed <- partial(rf_model, pred.var = "windspeed", plot = FALSE)
+
+add_density <- function(pdp_data, original_data, variable, xlab, ylab) {
+  ggplot() +
+    geom_line(data = pdp_data, aes_string(x = variable, y = "yhat"), color = 'grey') +
+    geom_rug(data = original_data, aes_string(x = variable), sides = "b", alpha = 0.5) +
+    ggtitle(paste("Partial Dependence Plot for", xlab)) +
+    ylab(ylab) +
+    xlab(xlab)
+}
+
+# Visualization
+plot_days <- add_density(pdp_days, day, "days_since_2011", "Days Since 2011", "Partial Dependence")
+plot_temp <- add_density(pdp_temp, day, "temp", "Temperature (°C)", "Partial Dependence")
+plot_hum <- add_density(pdp_hum, day, "hum", "Humidity (%)", "Partial Dependence")
+plot_windspeed <- add_density(pdp_windspeed, day, "windspeed", "Wind Speed (km/h)", "Partial Dependence")
+
+print(plot_days)
+print(plot_temp)
+print(plot_hum)
+print(plot_windspeed)
+
+```
+
+
+# 2.- Bidimensional Partial Dependency Plot.
+```{r}
+# Load needed packages
+#install.packages(c("randomForest", "ggplot2", "dplyr", "pdp"))
+library(randomForest)
+library(ggplot2)
+library(dplyr)
+library(pdp)
+
+
+# Load the data
+day <- read.csv("~/day.csv")
+
+## One-hot encoding of the attribute season
+day$spring <- ifelse(day$season == 2, 1, 0)
+day$summer <- ifelse(day$season == 3, 1, 0)
+day$fall <- ifelse(day$season == 4, 1, 0)
+
+# Create the feature MISTY
+day$MISTY <- ifelse(day$weathersit == 2, 1, 0)
+
+# Generate the feature RAIN
+day$RAIN <- ifelse(day$weathersit %in% c(3, 4), 1, 0)
+
+# Denormalize atributes temp, hum and windspeed
+day$temp <- day$temp * 47 - 8
+day$hum <- day$hum * 100
+day$windspeed <- day$windspeed * 67
+
+# Create the feature days_since_2011
+day$days_since_2011 <- as.numeric(difftime(as.Date(day$dteday), as.Date("2011-01-01"), units = "days"))
+
+df_selected <- day[, c("spring", "summer", "fall", "MISTY", "RAIN", "temp", "hum", "windspeed", "days_since_2011", "workingday", "holiday", "cnt")]
+
+# Choose a random subset of the data
+set.seed(123)  # Set seed for reproducibility
+sample_size <- 1000  # Adjust sample size
+day_sample <- df_selected %>% sample_n(sample_size, replace = TRUE)
+
+# Random Forest
+rf_model_2 <- randomForest(cnt ~ hum + temp, data = day_sample)
+
+# 2D Partial Dependency Plot (PDP)
+pdp_data <- partial(rf_model_2, pred.var = c("hum", "temp"), chull = TRUE)
+
+# Plot using geom_title()
+ggplot(pdp_data, aes(x = hum, y = temp, fill = yhat)) +
+  geom_tile() +
+  scale_fill_viridis_c() +
+  labs(title = "2D Partial Dependency Plot",
+       x = "Humidity",
+       y = "Temperature",
+       fill = "Predicted Bikes Rented") +
+  theme_minimal()
+
+# Density distribution of input features
+ggplot(day_sample, aes(x = hum, y = temp)) +
+  geom_density2d() +
+  geom_point(alpha = 0.3, size = 0.5) +
+  labs(title = "Density Distribution of Input Features",
+       x = "Humidity",
+       y = "Temperature") +
+  theme_minimal()
+```
+
+
+# 3.- PDP to explain the price of a house.
+```{r}
+# Load needed packages
+#install.packages(c("randomForest", "ggplot2", "dplyr", "pdp"))
+library(randomForest)
+library(ggplot2)
+library(dplyr)
+library(pdp)
+
+# Load the data
+house <- read.csv("~/kc_house_data.csv")
+
+# Choose a random subset of the data
+set.seed(123)  # Set seed for reproducibility
+sample_size <- 1000  # Adjust sample size
+house_sample <- house %>% sample_n(sample_size)
+
+# Train the Random Forest model
+rf_model_3 <- randomForest(price ~ bedrooms + bathrooms + sqft_living + sqft_lot + floors + yr_built, data = house_sample, ntree = 500)
+
+# Create Partial Dependency Plots
+features <- c("bedrooms", "bathrooms", "sqft_living", "floors")
+pdp_list <- list()
+
+# Function to add density or bar plots
+add_density_or_bar <- function(pdp_data, original_data, variable, xlab, ylab) {
+  if (is.numeric(original_data[[variable]])) {
+    ggplot() +
+      geom_line(data = pdp_data, aes_string(x = variable, y = "yhat"), color = 'black') +
+      geom_rug(data = original_data, aes_string(x = variable), sides = "b", alpha = 0.5) +
+      labs(title = paste("Partial Dependence Plot for", xlab),
+           x = xlab,
+           y = ylab) +
+      theme_minimal()
+  } else {
+    ggplot() +
+      geom_line(data = pdp_data, aes_string(x = variable, y = "yhat"), color = 'black') +
+      geom_bar(data = original_data, aes_string(x = variable), alpha = 0.5) +
+      labs(title = paste("Partial Dependence Plot for", xlab),
+           x = xlab,
+           y = ylab) +
+      theme_minimal()
+  }
+}
+
+for (feature in features) {
+  pdp_data <- partial(rf_model_3, pred.var = feature, plot = FALSE)
+  
+  p <- add_density_or_bar(pdp_data, house_sample, feature, feature, "Predicted Price")
+  
+  pdp_list[[feature]] <- p
+}
+
+# Print the plots
+print(pdp_list$bedrooms)
+print(pdp_list$bathrooms)
+print(pdp_list$sqft_living)
+print(pdp_list$floors)
+
+# Generate textual results for interpretation
+textual_results <- list()
+
+for (feature in features) {
+  pdp_data <- partial(rf_model_3, pred.var = feature, plot = FALSE)
+  summary_stats <- summary(pdp_data$yhat)
+  textual_results[[feature]] <- summary_stats
+}
+
+# Print textual results
+for (feature in features) {
+  cat("\nFeature:", feature, "\n")
+  print(textual_results[[feature]])
+}
+
+
+```
+
